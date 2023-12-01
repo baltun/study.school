@@ -57,12 +57,14 @@ class RestoreCoursesAttendance extends Command
                 foreach ($duplicateSessions as $duplicateSession) {
 
                     //Всех участников дубликата перенести в главное занятие
+                    $duplicateSessionsIdsForDelete = [];
                     if ($duplicateSession->id <> $originSession->id) {
                         $duplicateMembers = DB::select('
                             select * from session_members sm
                             where sm.session_id = :id
                             ', ['id' => $duplicateSession->id]);
                         //Для каждого участника дубликата
+                        $duplicateMembersIdsForDelete = [];
                         foreach ($duplicateMembers as $duplicateMember) {
                             //Проверить, есть ли участник в главном занятии
                             $duplicateMemberInOriginSession = DB::select('
@@ -73,8 +75,7 @@ class RestoreCoursesAttendance extends Command
                                 'origin_session_id' => $originSession->id,
                                 'duplicate_client_id' => $duplicateMember->client_id,
                             ]);
-                            $fuck = DB::select('
-                                select * from session_members sm');
+
                             // и если нет - перенести его туда
                             if (!$duplicateMemberInOriginSession) {
                                 DB::insert("
@@ -85,23 +86,29 @@ class RestoreCoursesAttendance extends Command
                                     'duplicate_client_id' => $duplicateMember->client_id,
                                 ]);
                             }
-                            //Удалить запись об участнике в занятии-дубликате
-                            DB::delete("
-                                delete from session_members
-                                where id = :duplicate_member_id
-                            ", [
-                                'duplicate_member_id' => $duplicateMember->id,
-                            ]);
+
+                            // добавить id участника к удаляемым
+                            $duplicateMembersIdsForDelete[] = $duplicateMember->id;
 
                         }
-                        //Удалить дубликат занятия
-                        DB::delete( "
-                        delete from sessions
-                            where id = :duplicate_session_id
-                        ",[
-                            'duplicate_session_id' => $duplicateSession->id
+                        //Удалить запись об участниках в занятиях-дубликатах
+                        DB::delete("
+                                delete from session_members
+                                where id in (:duplicate_member_ids)
+                            ", [
+                            'duplicate_member_ids' => implode(', ', $duplicateMembersIdsForDelete),
                         ]);
+
+                        // Добавить id занятия в список на удаление
+                        $duplicateSessionsIdsForDelete[] = $duplicateSession->id;
                     }
+                    //Удалить дубликаты занятий по собранному списку id
+                    DB::delete( "
+                        delete from sessions
+                            where id in (:duplicate_session_ids)
+                        ",[
+                        'duplicate_session_ids' => implode(', ', $duplicateSessionsIdsForDelete),
+                    ]);
                 }
             }
             DB::commit();
